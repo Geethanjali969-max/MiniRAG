@@ -1,0 +1,251 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MiniRAG | Document Assistant</title>
+    <style>
+        * { box-sizing: border-box; }
+
+        body {
+            margin: 0;
+            font-family: Arial, sans-serif;
+            background: #f4f7fb;
+            color: #172033;
+        }
+
+        header {
+            background: #fff;
+            border-bottom: 1px solid #e5eaf2;
+            padding: 20px 7%;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .brand { font-size: 23px; font-weight: 700; color: #4338ca; }
+        .status { color: #15803d; font-size: 13px; }
+
+        main { max-width: 850px; margin: 45px auto; padding: 0 20px; }
+
+        .intro { text-align: center; margin-bottom: 30px; }
+        .intro h1 { font-size: 34px; margin-bottom: 12px; }
+        .intro p { color: #64748b; line-height: 1.6; }
+
+        .card {
+            background: white;
+            border: 1px solid #e5eaf2;
+            border-radius: 16px;
+            padding: 25px;
+            margin-bottom: 22px;
+            box-shadow: 0 5px 20px #17203308;
+        }
+
+        h2 { font-size: 19px; margin-top: 0; }
+
+        .upload-area {
+            border: 2px dashed #c7d2fe;
+            background: #f8faff;
+            padding: 28px 15px;
+            border-radius: 12px;
+            text-align: center;
+        }
+
+        input[type="file"] { display: block; margin: 18px auto; max-width: 100%; }
+
+        textarea {
+            width: 100%;
+            min-height: 105px;
+            resize: vertical;
+            padding: 14px;
+            border: 1px solid #cbd5e1;
+            border-radius: 10px;
+            font: inherit;
+            margin: 10px 0 15px;
+        }
+
+        button {
+            background: #4f46e5;
+            color: white;
+            border: none;
+            padding: 12px 18px;
+            border-radius: 9px;
+            font-size: 15px;
+            font-weight: 600;
+            cursor: pointer;
+        }
+
+        button:disabled { opacity: 0.6; cursor: wait; }
+
+        .secondary { background: #e0e7ff; color: #3730a3; }
+        .message {
+            display: none;
+            padding: 13px;
+            margin-top: 16px;
+            border-radius: 9px;
+            line-height: 1.5;
+            overflow-wrap: anywhere;
+            white-space: pre-wrap;
+        }
+
+        .success { display: block; background: #f0fdf4; color: #166534; }
+        .error { display: block; background: #fef2f2; color: #991b1b; }
+        .answer { display: block; background: #f5f3ff; color: #312e81; }
+
+        footer { text-align: center; padding: 25px; color: #94a3b8; font-size: 13px; }
+
+        @media (max-width: 600px) {
+            main { margin-top: 28px; }
+            .intro h1 { font-size: 27px; }
+            .card { padding: 19px; }
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="brand">✦ MiniRAG</div>
+        <div class="status">● AI document assistant</div>
+    </header>
+
+    <main>
+        <section class="intro">
+            <h1>Your documents, understood.</h1>
+            <p>Upload a PDF, ask a question, and get an answer based on your document using Gemini AI.</p>
+        </section>
+
+        <section class="card">
+            <h2>1. Upload your document</h2>
+            <div class="upload-area">
+                <p>Select a PDF document to get started.</p>
+                <form id="uploadForm">
+                    <input type="file" id="pdfFile" accept=".pdf,application/pdf" required>
+                    <button type="submit" id="uploadButton">Upload PDF</button>
+                </form>
+            </div>
+            <div id="uploadMessage" class="message" role="status"></div>
+        </section>
+
+        <section class="card">
+            <h2>2. Ask your document</h2>
+            <form id="questionForm">
+                <label for="question">What would you like to know?</label>
+                <textarea id="question" placeholder="For example: Summarize the main points of this document." required></textarea>
+                <button type="submit" id="askButton">Ask MiniRAG →</button>
+            </form>
+            <div id="answerMessage" class="message" role="status"></div>
+        </section>
+    </main>
+
+    <footer>MiniRAG · Retrieval-Augmented Generation · Powered by Gemini</footer>
+
+    <script>
+        const uploadForm = document.getElementById("uploadForm");
+        const pdfFile = document.getElementById("pdfFile");
+        const uploadButton = document.getElementById("uploadButton");
+        const uploadMessage = document.getElementById("uploadMessage");
+        const questionForm = document.getElementById("questionForm");
+        const question = document.getElementById("question");
+        const askButton = document.getElementById("askButton");
+        const answerMessage = document.getElementById("answerMessage");
+
+        let documentUploaded = false;
+
+        function showMessage(element, text, type) {
+            element.className = "message " + type;
+            element.textContent = text;
+        }
+
+        async function readError(response) {
+            try {
+                const data = await response.json();
+                return data.detail || data.message || data.error || JSON.stringify(data);
+            } catch {
+                return await response.text();
+            }
+        }
+
+        uploadForm.addEventListener("submit", async function(event) {
+            event.preventDefault();
+
+            const file = pdfFile.files[0];
+            if (!file) return;
+
+            if (!file.name.toLowerCase().endsWith(".pdf")) {
+                showMessage(uploadMessage, "Please select a PDF file.", "error");
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append("file", file);
+
+            uploadButton.disabled = true;
+            uploadButton.textContent = "Uploading...";
+            uploadMessage.className = "message";
+            documentUploaded = false;
+
+            try {
+                const response = await fetch("/api/pdf/extract", {
+                    method: "POST",
+                    body: formData
+                });
+
+                if (!response.ok) {
+                    throw new Error(await readError(response));
+                }
+
+                const chunks = await response.json();
+                documentUploaded = true;
+
+                showMessage(
+                    uploadMessage,
+                    "PDF uploaded successfully! Your document has been processed into " +
+                    chunks.length + " text chunks. You can now ask questions.",
+                    "success"
+                );
+            } catch (error) {
+                showMessage(uploadMessage, "Upload failed: " + error.message, "error");
+            } finally {
+                uploadButton.disabled = false;
+                uploadButton.textContent = "Upload PDF";
+            }
+        });
+
+        questionForm.addEventListener("submit", async function(event) {
+            event.preventDefault();
+
+            const text = question.value.trim();
+            if (!text) return;
+
+            if (!documentUploaded) {
+                showMessage(answerMessage, "Please upload a PDF before asking a question.", "error");
+                return;
+            }
+
+            askButton.disabled = true;
+            askButton.textContent = "Thinking...";
+            answerMessage.className = "message";
+
+            try {
+                const response = await fetch("/api/question/search", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ question: text })
+                });
+
+                if (!response.ok) {
+                    throw new Error(await readError(response));
+                }
+
+                const answer = await response.text();
+                showMessage(answerMessage, answer, "answer");
+            } catch (error) {
+                showMessage(answerMessage, "Could not get an answer: " + error.message, "error");
+            } finally {
+                askButton.disabled = false;
+                askButton.textContent = "Ask MiniRAG →";
+            }
+        });
+    </script>
+</body>
+</html>
